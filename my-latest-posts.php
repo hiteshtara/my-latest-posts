@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Plugin Name:       My Latest Posts
  * Description:       Example block scaffolded with Create Block tool.
@@ -13,18 +14,68 @@
  * @package CreateBlock
  */
 
-if ( ! defined( 'ABSPATH' ) ) {
+if (!defined('ABSPATH')) {
 	exit; // Exit if accessed directly.
 }
 
 /**
- * Registers the block using the metadata loaded from the `block.json` file.
- * Behind the scenes, it registers also all assets so they can be enqueued
- * through the block editor in the corresponding context.
- *
- * @see https://developer.wordpress.org/reference/functions/register_block_type/
+ * Register the block dynamically based on `block.json` location.
  */
-function create_block_my_latest_posts_block_init() {
-	register_block_type( __DIR__ . '/build/my-latest-posts' );
+function create_block_my_latest_posts_block_init()
+{
+	// Detect block.json path inside `build/`
+	$block_path = glob(__DIR__ . '/build/*/block.json');
+
+	if (!empty($block_path[0])) {
+		$block_dir = dirname($block_path[0]);
+		register_block_type($block_dir, [
+			'render_callback' => 'latest_posts_render_callback',
+			'args' => [
+				'context' => [
+					'type' => 'string',
+					'default' => 'view',
+					'enum' => ['view', 'edit'],
+				],
+			],
+			'permission_callback' => '__return_true' // ✅ Allow all users
+		]);
+	} else {
+		register_block_type(__DIR__ . '/build', [
+			'render_callback' => 'latest_posts_render_callback',
+			'permission_callback' => function () {
+				return current_user_can('read') || !is_admin(); // ✅ Allow non-logged-in users
+			}
+		]);
+	}
 }
-add_action( 'init', 'create_block_my_latest_posts_block_init' );
+add_action('init', 'create_block_my_latest_posts_block_init');
+
+/**
+ * Server-side rendering for the block.
+ */
+function latest_posts_render_callback($attributes)
+{
+	$query_args = [
+		'posts_per_page' => isset($attributes['postsToShow']) ? intval($attributes['postsToShow']) : 5,
+		'post_status'    => 'publish',
+	];
+
+	$query = new WP_Query($query_args);
+
+	if (!$query->have_posts()) {
+		return '<p>No posts found.</p>';
+	}
+
+	$output = '<ul class="latest-posts-block">';
+	while ($query->have_posts()) {
+		$query->the_post();
+		$output .= '<li>';
+		$output .= '<a href="' . esc_url(get_permalink()) . '">' . esc_html(get_the_title()) . '</a>';
+		$output .= '</li>';
+	}
+	$output .= '</ul>';
+
+	wp_reset_postdata();
+
+	return $output;
+}
